@@ -34,15 +34,28 @@ bot.catch((err, ctx) => {
 // Функция для запроса к ChatGPT
 async function askChatGPT(question) {
 	try {
+		console.log('Отправляю запрос к ChatGPT с вопросом:', question);
+
 		const response = await openai.chat.completions.create({
 			model: "gpt-4",
 			messages: [{ role: "user", content: question }],
 			max_tokens: 200,
 		});
 
-		return response.choices[0].message.content.trim();
+		console.log('Получен ответ от API OpenAI');
+
+		if (!response.choices || response.choices.length === 0) {
+			console.error('Ошибка: Пустой ответ от ChatGPT');
+			return "Ошибка при обработке запроса. Получен пустой ответ от ChatGPT.";
+		}
+
+		const answer = response.choices[0].message.content.trim();
+		console.log('Обработанный ответ от ChatGPT:', answer.substring(0, 50) + (answer.length > 50 ? '...' : ''));
+
+		return answer;
 	} catch (error) {
 		console.error("Ошибка ChatGPT:", error);
+		console.error("Детали ошибки:", JSON.stringify(error, null, 2));
 		return "Ошибка при обработке запроса. Попробуйте позже.";
 	}
 }
@@ -187,28 +200,36 @@ bot.on('message', (ctx) => {
 bot.on("text", async (ctx) => {
 	// Проверяем, не является ли сообщение командой
 	if (ctx.message.text.startsWith('/')) {
+		console.log('Сообщение является командой, пропускаем');
 		return; // Пропускаем команды, они обрабатываются выше
 	}
 
 	console.log('Получено текстовое сообщение от пользователя:', ctx.from.id, 'Текст:', ctx.message.text);
 	const question = ctx.message.text;
-	ctx.reply("Обрабатываю ваш запрос...");
-
-	const answer = await askChatGPT(question);
-	console.log('Получен ответ от ChatGPT:', answer.substring(0, 50) + '...');
 
 	try {
-		console.log('Пытаюсь отправить сообщение в канал:', CHANNEL_ID);
-		await bot.telegram.sendMessage(
-			CHANNEL_ID,
-			`❓ *Вопрос:* ${question}\n\n💡 *Ответ:* ${answer}`,
-			{ parse_mode: "Markdown" }
-		);
-		console.log('Сообщение успешно отправлено в канал');
-		ctx.reply("Ответ опубликован в канале!");
+		await ctx.reply("Обрабатываю ваш запрос...");
+		console.log('Отправляю запрос к ChatGPT...');
+
+		const answer = await askChatGPT(question);
+		console.log('Получен ответ от ChatGPT:', answer.substring(0, 50) + '...');
+
+		try {
+			console.log('Пытаюсь отправить сообщение в канал:', CHANNEL_ID);
+			await bot.telegram.sendMessage(
+				CHANNEL_ID,
+				`❓ *Вопрос:* ${question}\n\n💡 *Ответ:* ${answer}`,
+				{ parse_mode: "Markdown" }
+			);
+			console.log('Сообщение успешно отправлено в канал');
+			await ctx.reply("Ответ опубликован в канале!");
+		} catch (error) {
+			console.error("Ошибка отправки в канал:", error);
+			await ctx.reply("Ошибка при публикации ответа: " + error.message);
+		}
 	} catch (error) {
-		console.error("Ошибка отправки в канал:", error);
-		ctx.reply("Ошибка при публикации ответа: " + error.message);
+		console.error("Ошибка при обработке сообщения:", error);
+		await ctx.reply("Произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте позже.");
 	}
 });
 
