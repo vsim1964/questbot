@@ -338,29 +338,115 @@ app.post(`/webhook/${BOT_TOKEN}`, async (req, res) => {
 		if (req.body.message && req.body.message.text) {
 			console.log('Обнаружено текстовое сообщение в запросе:', req.body.message.text);
 
-			// Если это не команда, логируем это отдельно и обрабатываем напрямую
-			if (!req.body.message.text.startsWith('/')) {
+			// Создаем контекст для обработки
+			const ctx = {
+				message: req.body.message,
+				from: req.body.message.from,
+				chat: req.body.message.chat,
+				reply: async (text) => {
+					console.log('Отправляю ответ пользователю:', text);
+					try {
+						const result = await bot.telegram.sendMessage(req.body.message.chat.id, text);
+						console.log('Ответ успешно отправлен пользователю');
+						return result;
+					} catch (error) {
+						console.error('Ошибка при отправке ответа пользователю:', error);
+						throw error;
+					}
+				}
+			};
+
+			// Если это команда, обрабатываем её
+			if (req.body.message.text.startsWith('/')) {
+				console.log('Обнаружена команда:', req.body.message.text);
+
+				// Обрабатываем команды
+				const command = req.body.message.text.split(' ')[0].substring(1);
+
+				switch (command) {
+					case 'start':
+						console.log('Обрабатываю команду /start');
+						await ctx.reply("Привет! Задай мне вопрос, и я отправлю ответ в канал.");
+						break;
+					case 'test':
+						console.log('Обрабатываю команду /test');
+						await ctx.reply("Тест пройден! Бот работает.");
+						break;
+					case 'status':
+						console.log('Обрабатываю команду /status');
+						await ctx.reply("Проверяю статус бота и подключение к каналу...");
+
+						try {
+							// Проверяем информацию о webhook
+							const webhookInfo = await bot.telegram.getWebhookInfo();
+
+							// Проверяем права в канале
+							const channelAccess = await checkBotPermissionsInChannel();
+
+							const statusMessage = `
+Статус бота:
+- Webhook URL: ${webhookInfo.url || 'не установлен'}
+- Webhook активен: ${webhookInfo.url ? 'да' : 'нет'}
+- Доступ к каналу: ${channelAccess ? 'есть' : 'нет'}
+- ID канала: ${CHANNEL_ID}
+- Режим работы: ${process.env.NODE_ENV === 'production' ? 'Production (webhook)' : 'Development (polling)'}
+`;
+
+							await ctx.reply(statusMessage);
+						} catch (error) {
+							console.error('Ошибка при проверке статуса:', error);
+							await ctx.reply(`Ошибка при проверке статуса: ${error.message}`);
+						}
+						break;
+					case 'channel':
+						console.log('Обрабатываю команду /channel');
+						await ctx.reply(`Текущий ID канала: ${CHANNEL_ID}`);
+
+						// Проверяем, является ли пользователь администратором бота
+						if (ctx.from.id.toString() === process.env.ADMIN_ID) {
+							await ctx.reply("Вы администратор бота. Чтобы обновить ID канала, отправьте команду /setchannel ID_КАНАЛА");
+							await ctx.reply("Чтобы узнать ID канала, добавьте бота @userinfobot в канал, отправьте сообщение и перешлите его боту @userinfobot.");
+						}
+						break;
+					case 'setchannel':
+						console.log('Обрабатываю команду /setchannel');
+
+						// Проверяем, является ли пользователь администратором бота
+						if (ctx.from.id.toString() !== process.env.ADMIN_ID) {
+							await ctx.reply("У вас нет прав для изменения ID канала.");
+							break;
+						}
+
+						const args = ctx.message.text.split(' ');
+						if (args.length < 2) {
+							await ctx.reply("Пожалуйста, укажите ID канала. Пример: /setchannel -1001234567890");
+							break;
+						}
+
+						const newChannelId = args[1];
+						await ctx.reply(`Пытаюсь обновить ID канала на: ${newChannelId}`);
+
+						try {
+							// Проверяем доступ к новому каналу
+							await bot.telegram.sendMessage(
+								newChannelId,
+								'Тестовое сообщение для проверки доступа к каналу.',
+								{ parse_mode: 'Markdown' }
+							);
+
+							await ctx.reply(`✅ Доступ к каналу ${newChannelId} подтвержден. Обновите переменную CHANNEL_ID в настройках Railway.`);
+						} catch (error) {
+							await ctx.reply(`❌ Ошибка доступа к каналу ${newChannelId}: ${error.message}`);
+						}
+						break;
+					default:
+						console.log('Неизвестная команда:', command);
+						await ctx.reply(`Неизвестная команда: /${command}`);
+				}
+			} else {
+				// Если это обычное текстовое сообщение, обрабатываем его
 				console.log('Это обычное текстовое сообщение, не команда. Обрабатываю напрямую...');
 
-				// Создаем контекст для обработки
-				const ctx = {
-					message: req.body.message,
-					from: req.body.message.from,
-					chat: req.body.message.chat,
-					reply: async (text) => {
-						console.log('Отправляю ответ пользователю:', text);
-						try {
-							const result = await bot.telegram.sendMessage(req.body.message.chat.id, text);
-							console.log('Ответ успешно отправлен пользователю');
-							return result;
-						} catch (error) {
-							console.error('Ошибка при отправке ответа пользователю:', error);
-							throw error;
-						}
-					}
-				};
-
-				// Обрабатываем сообщение напрямую
 				const question = req.body.message.text;
 
 				try {
@@ -388,26 +474,16 @@ app.post(`/webhook/${BOT_TOKEN}`, async (req, res) => {
 					console.error("Детали ошибки:", JSON.stringify(error, null, 2));
 					await ctx.reply("Произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте позже.");
 				}
-
-				res.sendStatus(200);
-				console.log('Webhook запрос с текстовым сообщением обработан напрямую');
-				return;
 			}
+
+			res.sendStatus(200);
+			console.log('Webhook запрос обработан');
+			return;
 		}
 
-		// Устанавливаем таймаут для обработки запроса
-		const timeoutPromise = new Promise((_, reject) =>
-			setTimeout(() => reject(new Error('Timeout')), 25000)
-		);
-
-		// Обрабатываем запрос с таймаутом
-		await Promise.race([
-			bot.handleUpdate(req.body),
-			timeoutPromise
-		]);
-
+		// Если это не текстовое сообщение, просто отвечаем успешным статусом
 		res.sendStatus(200);
-		console.log('Webhook запрос успешно обработан');
+		console.log('Webhook запрос обработан (не текстовое сообщение)');
 	} catch (error) {
 		console.error('Ошибка при обработке webhook запроса:', error);
 		console.error('Детали ошибки:', JSON.stringify(error, null, 2));
