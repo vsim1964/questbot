@@ -349,7 +349,14 @@ app.post(`/webhook/${BOT_TOKEN}`, async (req, res) => {
 					chat: req.body.message.chat,
 					reply: async (text) => {
 						console.log('Отправляю ответ пользователю:', text);
-						return bot.telegram.sendMessage(req.body.message.chat.id, text);
+						try {
+							const result = await bot.telegram.sendMessage(req.body.message.chat.id, text);
+							console.log('Ответ успешно отправлен пользователю');
+							return result;
+						} catch (error) {
+							console.error('Ошибка при отправке ответа пользователю:', error);
+							throw error;
+						}
 					}
 				};
 
@@ -357,16 +364,20 @@ app.post(`/webhook/${BOT_TOKEN}`, async (req, res) => {
 				const question = req.body.message.text;
 
 				try {
+					console.log('Отправляю сообщение "Обрабатываю ваш запрос..."');
 					await ctx.reply("Обрабатываю ваш запрос...");
 					console.log('Отправляю запрос к ChatGPT...');
 
 					const answer = await askChatGPT(question);
-					console.log('Получен ответ от ChatGPT:', answer.substring(0, 50) + '...');
+					console.log('Получен ответ от ChatGPT:', answer);
 
 					// Используем безопасную функцию отправки сообщения в канал
+					console.log('Отправляю сообщение в канал...');
 					const result = await safeSendMessageToChannel(question, answer);
+					console.log('Результат отправки в канал:', result);
 
 					if (result.success) {
+						console.log('Отправляю сообщение "Ответ опубликован в канале!"');
 						await ctx.reply("Ответ опубликован в канале!");
 					} else {
 						console.error("Ошибка отправки в канал:", result.error);
@@ -374,6 +385,7 @@ app.post(`/webhook/${BOT_TOKEN}`, async (req, res) => {
 					}
 				} catch (error) {
 					console.error("Ошибка при обработке сообщения:", error);
+					console.error("Детали ошибки:", JSON.stringify(error, null, 2));
 					await ctx.reply("Произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте позже.");
 				}
 
@@ -398,6 +410,7 @@ app.post(`/webhook/${BOT_TOKEN}`, async (req, res) => {
 		console.log('Webhook запрос успешно обработан');
 	} catch (error) {
 		console.error('Ошибка при обработке webhook запроса:', error);
+		console.error('Детали ошибки:', JSON.stringify(error, null, 2));
 		res.sendStatus(500);
 	}
 });
@@ -587,36 +600,55 @@ async function safeSendMessageToChannel(question, answer) {
 
 		// Форматируем сообщение
 		const message = `❓ *Вопрос:* ${question}\n\n💡 *Ответ:* ${answer}`;
+		console.log('Сформировано сообщение для канала:', message.substring(0, 100) + (message.length > 100 ? '...' : ''));
 
-		// Отправляем сообщение в канал
-		await bot.telegram.sendMessage(
-			CHANNEL_ID,
-			message,
-			{ parse_mode: "Markdown" }
-		);
-
-		console.log('Сообщение успешно отправлено в канал');
-		return { success: true };
-	} catch (error) {
-		console.error("Ошибка отправки в канал:", error.message);
-
-		// Пробуем отправить без Markdown, если ошибка связана с форматированием
-		if (error.message.includes('can\'t parse entities') || error.message.includes('parse message text')) {
-			try {
-				console.log('Пробую отправить сообщение без Markdown...');
-				await bot.telegram.sendMessage(
-					CHANNEL_ID,
-					`❓ Вопрос: ${question}\n\n💡 Ответ: ${answer}`,
-					{ parse_mode: "" }
-				);
-				console.log('Сообщение успешно отправлено в канал без Markdown');
-				return { success: true };
-			} catch (plainError) {
-				console.error("Ошибка отправки в канал без Markdown:", plainError.message);
-				return { success: false, error: plainError.message };
-			}
+		// Проверяем доступность канала перед отправкой
+		try {
+			console.log('Проверяю доступность канала...');
+			const chat = await bot.telegram.getChat(CHANNEL_ID);
+			console.log('Канал доступен:', chat.title || chat.username || CHANNEL_ID);
+		} catch (chatError) {
+			console.error('Ошибка при проверке канала:', chatError.message);
+			return { success: false, error: `Канал недоступен: ${chatError.message}` };
 		}
 
+		// Отправляем сообщение в канал
+		console.log('Отправляю сообщение в канал с Markdown...');
+		try {
+			await bot.telegram.sendMessage(
+				CHANNEL_ID,
+				message,
+				{ parse_mode: "Markdown" }
+			);
+
+			console.log('Сообщение успешно отправлено в канал с Markdown');
+			return { success: true };
+		} catch (markdownError) {
+			console.error("Ошибка отправки в канал с Markdown:", markdownError.message);
+
+			// Пробуем отправить без Markdown, если ошибка связана с форматированием
+			if (markdownError.message.includes('can\'t parse entities') || markdownError.message.includes('parse message text')) {
+				try {
+					console.log('Пробую отправить сообщение без Markdown...');
+					await bot.telegram.sendMessage(
+						CHANNEL_ID,
+						`❓ Вопрос: ${question}\n\n💡 Ответ: ${answer}`,
+						{ parse_mode: "" }
+					);
+					console.log('Сообщение успешно отправлено в канал без Markdown');
+					return { success: true };
+				} catch (plainError) {
+					console.error("Ошибка отправки в канал без Markdown:", plainError.message);
+					return { success: false, error: plainError.message };
+				}
+			} else {
+				// Если ошибка не связана с форматированием, возвращаем её
+				return { success: false, error: markdownError.message };
+			}
+		}
+	} catch (error) {
+		console.error("Общая ошибка отправки в канал:", error.message);
+		console.error("Детали ошибки:", JSON.stringify(error, null, 2));
 		return { success: false, error: error.message };
 	}
 }
