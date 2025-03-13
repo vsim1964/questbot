@@ -204,6 +204,13 @@ bot.on("text", async (ctx) => {
 		return; // Пропускаем команды, они обрабатываются выше
 	}
 
+	// Проверяем, не завершается ли работа бота
+	if (isShuttingDown) {
+		console.log('Бот завершает работу, новые запросы не обрабатываются');
+		await ctx.reply("Извините, бот в данный момент перезагружается. Пожалуйста, повторите запрос через минуту.");
+		return;
+	}
+
 	console.log('Получено текстовое сообщение от пользователя:', ctx.from.id, 'Текст:', ctx.message.text);
 	const question = ctx.message.text;
 
@@ -258,8 +265,14 @@ const app = express();
 app.use(express.json());
 
 // Webhook обработчик
-app.post(`/webhook/${BOT_TOKEN}`, (req, res) => {
+app.post(`/webhook/${BOT_TOKEN}`, async (req, res) => {
 	console.log('Получен POST запрос к webhook:', req.method, req.url);
+
+	// Проверяем, не завершается ли работа бота
+	if (isShuttingDown) {
+		console.log('Бот завершает работу, новые webhook запросы не обрабатываются');
+		return res.sendStatus(503); // Service Unavailable
+	}
 
 	// Проверяем, что тело запроса не пустое
 	if (!req.body || Object.keys(req.body).length === 0) {
@@ -270,7 +283,17 @@ app.post(`/webhook/${BOT_TOKEN}`, (req, res) => {
 	console.log('Тело запроса:', JSON.stringify(req.body, null, 2));
 
 	try {
-		bot.handleUpdate(req.body);
+		// Устанавливаем таймаут для обработки запроса
+		const timeoutPromise = new Promise((_, reject) =>
+			setTimeout(() => reject(new Error('Timeout')), 25000)
+		);
+
+		// Обрабатываем запрос с таймаутом
+		await Promise.race([
+			bot.handleUpdate(req.body),
+			timeoutPromise
+		]);
+
 		res.sendStatus(200);
 		console.log('Webhook запрос успешно обработан');
 	} catch (error) {
@@ -397,20 +420,44 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 // Обработка сигналов завершения
-process.on('SIGTERM', () => {
-	console.log('Получен сигнал SIGTERM, завершаю работу...');
+let isShuttingDown = false;
+
+process.on('SIGTERM', async () => {
+	console.log('Получен сигнал SIGTERM, готовлюсь к завершению работы...');
+	isShuttingDown = true;
+
+	// Даем время на обработку текущих запросов (30 секунд)
+	console.log('Ожидаю завершения текущих запросов (30 секунд)...');
+	await new Promise(resolve => setTimeout(resolve, 30000));
+
 	// Удаляем webhook перед завершением
-	bot.telegram.deleteWebhook()
-		.then(() => console.log('Webhook удален перед завершением'))
-		.catch(error => console.error('Ошибка при удалении webhook:', error))
-		.finally(() => process.exit(0));
+	try {
+		await bot.telegram.deleteWebhook();
+		console.log('Webhook удален перед завершением');
+	} catch (error) {
+		console.error('Ошибка при удалении webhook:', error);
+	}
+
+	console.log('Завершаю работу...');
+	process.exit(0);
 });
 
-process.on('SIGINT', () => {
-	console.log('Получен сигнал SIGINT, завершаю работу...');
+process.on('SIGINT', async () => {
+	console.log('Получен сигнал SIGINT, готовлюсь к завершению работы...');
+	isShuttingDown = true;
+
+	// Даем время на обработку текущих запросов (5 секунд)
+	console.log('Ожидаю завершения текущих запросов (5 секунд)...');
+	await new Promise(resolve => setTimeout(resolve, 5000));
+
 	// Удаляем webhook перед завершением
-	bot.telegram.deleteWebhook()
-		.then(() => console.log('Webhook удален перед завершением'))
-		.catch(error => console.error('Ошибка при удалении webhook:', error))
-		.finally(() => process.exit(0));
+	try {
+		await bot.telegram.deleteWebhook();
+		console.log('Webhook удален перед завершением');
+	} catch (error) {
+		console.error('Ошибка при удалении webhook:', error);
+	}
+
+	console.log('Завершаю работу...');
+	process.exit(0);
 });
