@@ -196,11 +196,32 @@ bot.on('message', (ctx) => {
 	}
 });
 
+// Обработка пересланных сообщений для определения ID канала
+bot.on('forward_date', (ctx) => {
+	if (ctx.message.forward_from_chat) {
+		const chatId = ctx.message.forward_from_chat.id;
+		const chatType = ctx.message.forward_from_chat.type;
+		const chatTitle = ctx.message.forward_from_chat.title || 'Неизвестно';
+
+		console.log(`Получено пересланное сообщение из ${chatType} "${chatTitle}" с ID: ${chatId}`);
+
+		ctx.reply(`Информация о чате:
+- Тип: ${chatType}
+- Название: ${chatTitle}
+- ID: ${chatId}
+
+Если это ваш канал, вы можете использовать этот ID с командой /setchannel ${chatId}`);
+	} else {
+		ctx.reply("Это сообщение не содержит информации о канале.");
+	}
+});
+
 // Обработка текстовых сообщений (не команд)
+// Важно: этот обработчик должен быть последним, чтобы не перехватывать другие типы сообщений
 bot.on("text", async (ctx) => {
 	// Проверяем, не является ли сообщение командой
 	if (ctx.message.text.startsWith('/')) {
-		console.log('Сообщение является командой, пропускаем');
+		console.log('Сообщение является командой, пропускаем в обработчике текстовых сообщений');
 		return; // Пропускаем команды, они обрабатываются выше
 	}
 
@@ -211,7 +232,7 @@ bot.on("text", async (ctx) => {
 		return;
 	}
 
-	console.log('Получено текстовое сообщение от пользователя:', ctx.from.id, 'Текст:', ctx.message.text);
+	console.log('Обрабатываю текстовое сообщение от пользователя:', ctx.from.id, 'Текст:', ctx.message.text);
 	const question = ctx.message.text;
 
 	try {
@@ -240,26 +261,6 @@ bot.on("text", async (ctx) => {
 	}
 });
 
-// Обработка пересланных сообщений для определения ID канала
-bot.on('forward_date', (ctx) => {
-	if (ctx.message.forward_from_chat) {
-		const chatId = ctx.message.forward_from_chat.id;
-		const chatType = ctx.message.forward_from_chat.type;
-		const chatTitle = ctx.message.forward_from_chat.title || 'Неизвестно';
-
-		console.log(`Получено пересланное сообщение из ${chatType} "${chatTitle}" с ID: ${chatId}`);
-
-		ctx.reply(`Информация о чате:
-- Тип: ${chatType}
-- Название: ${chatTitle}
-- ID: ${chatId}
-
-Если это ваш канал, вы можете использовать этот ID с командой /setchannel ${chatId}`);
-	} else {
-		ctx.reply("Это сообщение не содержит информации о канале.");
-	}
-});
-
 // Создание Express-сервера (держит процесс Railway активным)
 const app = express();
 app.use(express.json());
@@ -283,6 +284,59 @@ app.post(`/webhook/${BOT_TOKEN}`, async (req, res) => {
 	console.log('Тело запроса:', JSON.stringify(req.body, null, 2));
 
 	try {
+		// Проверяем наличие сообщения в запросе
+		if (req.body.message && req.body.message.text) {
+			console.log('Обнаружено текстовое сообщение в запросе:', req.body.message.text);
+
+			// Если это не команда, логируем это отдельно и обрабатываем напрямую
+			if (!req.body.message.text.startsWith('/')) {
+				console.log('Это обычное текстовое сообщение, не команда. Обрабатываю напрямую...');
+
+				// Создаем контекст для обработки
+				const ctx = {
+					message: req.body.message,
+					from: req.body.message.from,
+					chat: req.body.message.chat,
+					reply: async (text) => {
+						console.log('Отправляю ответ пользователю:', text);
+						return bot.telegram.sendMessage(req.body.message.chat.id, text);
+					}
+				};
+
+				// Обрабатываем сообщение напрямую
+				const question = req.body.message.text;
+
+				try {
+					await ctx.reply("Обрабатываю ваш запрос...");
+					console.log('Отправляю запрос к ChatGPT...');
+
+					const answer = await askChatGPT(question);
+					console.log('Получен ответ от ChatGPT:', answer.substring(0, 50) + '...');
+
+					try {
+						console.log('Пытаюсь отправить сообщение в канал:', CHANNEL_ID);
+						await bot.telegram.sendMessage(
+							CHANNEL_ID,
+							`❓ *Вопрос:* ${question}\n\n💡 *Ответ:* ${answer}`,
+							{ parse_mode: "Markdown" }
+						);
+						console.log('Сообщение успешно отправлено в канал');
+						await ctx.reply("Ответ опубликован в канале!");
+					} catch (error) {
+						console.error("Ошибка отправки в канал:", error);
+						await ctx.reply("Ошибка при публикации ответа: " + error.message);
+					}
+				} catch (error) {
+					console.error("Ошибка при обработке сообщения:", error);
+					await ctx.reply("Произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте позже.");
+				}
+
+				res.sendStatus(200);
+				console.log('Webhook запрос с текстовым сообщением обработан напрямую');
+				return;
+			}
+		}
+
 		// Устанавливаем таймаут для обработки запроса
 		const timeoutPromise = new Promise((_, reject) =>
 			setTimeout(() => reject(new Error('Timeout')), 25000)
