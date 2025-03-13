@@ -2,7 +2,7 @@ require('dotenv').config();
 const { Telegraf } = require("telegraf");
 const { OpenAI } = require("openai");
 const express = require("express");
-const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
+const fetch = require("node-fetch");
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
