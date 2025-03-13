@@ -1,12 +1,12 @@
 const { Telegraf } = require("telegraf");
 const { OpenAI } = require("openai");
+const express = require("express");
 
-// Читаем переменные окружения (Railway подставит их)
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const CHANNEL_ID = process.env.CHANNEL_ID;
+const PORT = process.env.PORT || 3000;
 
-// Проверяем, что все переменные заданы
 if (!BOT_TOKEN || !OPENAI_API_KEY || !CHANNEL_ID) {
 	console.error("Ошибка: отсутствуют переменные окружения!");
 	process.exit(1);
@@ -15,7 +15,7 @@ if (!BOT_TOKEN || !OPENAI_API_KEY || !CHANNEL_ID) {
 const bot = new Telegraf(BOT_TOKEN);
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
-// Функция для запроса к ChatGPT
+// ChatGPT API
 async function askChatGPT(question) {
 	try {
 		const response = await openai.chat.completions.create({
@@ -31,19 +31,18 @@ async function askChatGPT(question) {
 	}
 }
 
-// Команда /start
+// Обработка /start
 bot.start((ctx) => {
 	ctx.reply("Привет! Задай мне вопрос, и я отправлю ответ в канал.");
 });
 
-// Обработка сообщений от пользователей
+// Обработка сообщений
 bot.on("text", async (ctx) => {
 	const question = ctx.message.text;
 	ctx.reply("Обрабатываю ваш запрос...");
 
 	const answer = await askChatGPT(question);
 
-	// Отправка ответа в канал
 	try {
 		await bot.telegram.sendMessage(
 			CHANNEL_ID,
@@ -57,10 +56,17 @@ bot.on("text", async (ctx) => {
 	}
 });
 
-// Запуск бота
-bot.launch();
-console.log("Бот запущен на Railway!");
+// Настройка Webhook
+const app = express();
+app.use(express.json());
 
-// Обработка остановки Railway
-process.once("SIGINT", () => bot.stop("SIGINT"));
-process.once("SIGTERM", () => bot.stop("SIGTERM"));
+app.post(`/webhook/${BOT_TOKEN}`, (req, res) => {
+	bot.handleUpdate(req.body);
+	res.sendStatus(200);
+});
+
+app.listen(PORT, async () => {
+	const webhookUrl = `https://your-railway-app-url/webhook/${BOT_TOKEN}`;
+	await bot.telegram.setWebhook(webhookUrl);
+	console.log(`🚀 Бот работает через Webhook: ${webhookUrl}`);
+});
