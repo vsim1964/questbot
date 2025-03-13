@@ -16,8 +16,10 @@ if (!BOT_TOKEN || !OPENAI_API_KEY || !CHANNEL_ID) {
 }
 
 // Проверка формата ID канала
-if (!CHANNEL_ID.startsWith('-100')) {
+if (CHANNEL_ID.startsWith('-') && !CHANNEL_ID.startsWith('-100')) {
 	console.warn(`⚠️ ID канала ${CHANNEL_ID} может быть некорректным. Обычно ID публичных каналов начинаются с '-100'.`);
+} else if (CHANNEL_ID.startsWith('@')) {
+	console.log(`ℹ️ Используется username канала: ${CHANNEL_ID}`);
 }
 
 const bot = new Telegraf(BOT_TOKEN);
@@ -136,6 +138,7 @@ bot.command('channel', async (ctx) => {
 	// Проверяем, является ли пользователь администратором бота
 	if (ctx.from.id.toString() === process.env.ADMIN_ID) {
 		ctx.reply("Вы администратор бота. Чтобы обновить ID канала, отправьте команду /setchannel ID_КАНАЛА");
+		ctx.reply("Чтобы узнать ID канала, добавьте бота @userinfobot в канал, отправьте сообщение и перешлите его боту @userinfobot.");
 	}
 });
 
@@ -206,6 +209,26 @@ bot.on("text", async (ctx) => {
 	} catch (error) {
 		console.error("Ошибка отправки в канал:", error);
 		ctx.reply("Ошибка при публикации ответа: " + error.message);
+	}
+});
+
+// Обработка пересланных сообщений для определения ID канала
+bot.on('forward_date', (ctx) => {
+	if (ctx.message.forward_from_chat) {
+		const chatId = ctx.message.forward_from_chat.id;
+		const chatType = ctx.message.forward_from_chat.type;
+		const chatTitle = ctx.message.forward_from_chat.title || 'Неизвестно';
+
+		console.log(`Получено пересланное сообщение из ${chatType} "${chatTitle}" с ID: ${chatId}`);
+
+		ctx.reply(`Информация о чате:
+- Тип: ${chatType}
+- Название: ${chatTitle}
+- ID: ${chatId}
+
+Если это ваш канал, вы можете использовать этот ID с командой /setchannel ${chatId}`);
+	} else {
+		ctx.reply("Это сообщение не содержит информации о канале.");
 	}
 });
 
