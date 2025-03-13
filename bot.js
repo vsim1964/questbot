@@ -2,6 +2,7 @@ require('dotenv').config();
 const { Telegraf } = require("telegraf");
 const { OpenAI } = require("openai");
 const express = require("express");
+const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -214,7 +215,14 @@ app.use(express.json());
 
 // Webhook обработчик
 app.post(`/webhook/${BOT_TOKEN}`, (req, res) => {
-	console.log('Получен webhook запрос:', req.method, req.url);
+	console.log('Получен POST запрос к webhook:', req.method, req.url);
+
+	// Проверяем, что тело запроса не пустое
+	if (!req.body || Object.keys(req.body).length === 0) {
+		console.log('Получен пустой POST запрос, возможно проверка доступности');
+		return res.sendStatus(200);
+	}
+
 	console.log('Тело запроса:', JSON.stringify(req.body, null, 2));
 
 	try {
@@ -230,12 +238,20 @@ app.post(`/webhook/${BOT_TOKEN}`, (req, res) => {
 // Добавляем обработчик для проверки webhook
 app.get(`/webhook/${BOT_TOKEN}`, (req, res) => {
 	console.log('Получен GET запрос к webhook:', req.method, req.url);
-	res.send('Webhook работает!');
+	// Просто отвечаем, что webhook работает, но не обрабатываем как обновление
+	res.send('Webhook работает! Для обновлений используйте POST-запросы.');
 });
 
 // Корневой маршрут (Railway теперь не будет останавливать контейнер)
 app.get("/", (req, res) => {
+	console.log('Получен запрос к корневому маршруту');
 	res.send("Бот работает! 🚀");
+});
+
+// Добавляем маршрут для проверки здоровья приложения
+app.get("/health", (req, res) => {
+	console.log('Получен запрос проверки здоровья');
+	res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
 // Запуск сервера Express
@@ -297,7 +313,34 @@ app.listen(PORT, async () => {
 // Поддержка активности Railway (Лог в консоли каждые 5 минут)
 setInterval(() => {
 	console.log("✅ Сервер Railway работает и не останавливается");
-}, 1000 * 60 * 5);
+
+	// Дополнительная проверка для поддержания активности
+	try {
+		fetch("https://questbot-production.up.railway.app/health")
+			.then(response => console.log("Health check успешен:", response.status))
+			.catch(error => console.error("Ошибка health check:", error));
+	} catch (error) {
+		console.error("Ошибка при выполнении health check:", error);
+	}
+}, 1000 * 60 * 5); // Каждые 5 минут
+
+// Добавляем еще один интервал для более частых проверок
+setInterval(() => {
+	// Простая проверка активности каждую минуту
+	console.log("⏱️ Проверка активности");
+
+	// Проверяем, что webhook настроен правильно
+	bot.telegram.getWebhookInfo()
+		.then(info => {
+			if (!info.url || info.url !== WEBHOOK_URL) {
+				console.log("⚠️ Webhook не настроен или настроен неправильно, переустанавливаем...");
+				return bot.telegram.setWebhook(WEBHOOK_URL);
+			}
+			return Promise.resolve();
+		})
+		.then(() => console.log("✅ Webhook проверен"))
+		.catch(error => console.error("❌ Ошибка при проверке webhook:", error));
+}, 1000 * 60 * 10); // Каждые 10 минут
 
 // Обработка необработанных исключений
 process.on('uncaughtException', (error) => {
@@ -307,4 +350,23 @@ process.on('uncaughtException', (error) => {
 // Обработка необработанных отклонений промисов
 process.on('unhandledRejection', (reason, promise) => {
 	console.error('❌ Необработанное отклонение промиса:', reason);
+});
+
+// Обработка сигналов завершения
+process.on('SIGTERM', () => {
+	console.log('Получен сигнал SIGTERM, завершаю работу...');
+	// Удаляем webhook перед завершением
+	bot.telegram.deleteWebhook()
+		.then(() => console.log('Webhook удален перед завершением'))
+		.catch(error => console.error('Ошибка при удалении webhook:', error))
+		.finally(() => process.exit(0));
+});
+
+process.on('SIGINT', () => {
+	console.log('Получен сигнал SIGINT, завершаю работу...');
+	// Удаляем webhook перед завершением
+	bot.telegram.deleteWebhook()
+		.then(() => console.log('Webhook удален перед завершением'))
+		.catch(error => console.error('Ошибка при удалении webhook:', error))
+		.finally(() => process.exit(0));
 });
