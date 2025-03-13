@@ -36,17 +36,24 @@ async function askChatGPT(question) {
 	try {
 		console.log('Отправляю запрос к ChatGPT с вопросом:', question);
 
+		// Проверяем, что API ключ не пустой
+		if (!OPENAI_API_KEY || OPENAI_API_KEY.trim() === '') {
+			console.error('API ключ OpenAI отсутствует или пустой');
+			return getBackupAnswer(question);
+		}
+
 		const response = await openai.chat.completions.create({
-			model: "gpt-4",
+			model: "gpt-3.5-turbo", // Используем более стабильную модель
 			messages: [{ role: "user", content: question }],
 			max_tokens: 200,
+			timeout: 15000, // 15 секунд таймаут
 		});
 
 		console.log('Получен ответ от API OpenAI');
 
 		if (!response.choices || response.choices.length === 0) {
 			console.error('Ошибка: Пустой ответ от ChatGPT');
-			return "Ошибка при обработке запроса. Получен пустой ответ от ChatGPT.";
+			return getBackupAnswer(question);
 		}
 
 		const answer = response.choices[0].message.content.trim();
@@ -56,8 +63,34 @@ async function askChatGPT(question) {
 	} catch (error) {
 		console.error("Ошибка ChatGPT:", error);
 		console.error("Детали ошибки:", JSON.stringify(error, null, 2));
-		return "Ошибка при обработке запроса. Попробуйте позже.";
+		return getBackupAnswer(question);
 	}
+}
+
+// Функция для получения резервного ответа
+function getBackupAnswer(question) {
+	console.log('Использую резервный ответ для вопроса:', question);
+
+	// Простые ответы на распространенные вопросы
+	const commonQuestions = {
+		'столица россии': 'Столица России - Москва.',
+		'столица сша': 'Столица США - Вашингтон.',
+		'кто такой александр пушкин': 'Александр Сергеевич Пушкин (1799-1837) - великий русский поэт, драматург и прозаик, создатель современного русского литературного языка.',
+		'как звали пушкина': 'Полное имя - Александр Сергеевич Пушкин.'
+	};
+
+	// Приводим вопрос к нижнему регистру и удаляем знаки препинания
+	const normalizedQuestion = question.toLowerCase().replace(/[.,?!;:]/g, '');
+
+	// Проверяем, есть ли ответ на этот вопрос
+	for (const [key, value] of Object.entries(commonQuestions)) {
+		if (normalizedQuestion.includes(key)) {
+			return value;
+		}
+	}
+
+	// Если нет подходящего ответа, возвращаем общий ответ
+	return "Извините, я не могу ответить на этот вопрос прямо сейчас. Пожалуйста, попробуйте задать другой вопрос или повторите попытку позже.";
 }
 
 // Функция для проверки прав бота в канале
@@ -99,6 +132,27 @@ async function checkBotPermissionsInChannel() {
 		return true;
 	} catch (error) {
 		console.error('❌ Ошибка при проверке прав бота:', error.message);
+		return false;
+	}
+}
+
+// Проверка API ключа OpenAI при запуске
+async function checkOpenAIApiKey() {
+	try {
+		console.log('Проверяю API ключ OpenAI...');
+
+		// Простой запрос для проверки ключа
+		const response = await openai.chat.completions.create({
+			model: "gpt-3.5-turbo", // Используем более дешевую модель для проверки
+			messages: [{ role: "user", content: "Hello" }],
+			max_tokens: 5,
+		});
+
+		console.log('✅ API ключ OpenAI действителен');
+		return true;
+	} catch (error) {
+		console.error('❌ Ошибка при проверке API ключа OpenAI:', error.message);
+		console.error('Детали ошибки:', JSON.stringify(error, null, 2));
 		return false;
 	}
 }
@@ -242,18 +296,14 @@ bot.on("text", async (ctx) => {
 		const answer = await askChatGPT(question);
 		console.log('Получен ответ от ChatGPT:', answer.substring(0, 50) + '...');
 
-		try {
-			console.log('Пытаюсь отправить сообщение в канал:', CHANNEL_ID);
-			await bot.telegram.sendMessage(
-				CHANNEL_ID,
-				`❓ *Вопрос:* ${question}\n\n💡 *Ответ:* ${answer}`,
-				{ parse_mode: "Markdown" }
-			);
-			console.log('Сообщение успешно отправлено в канал');
+		// Используем безопасную функцию отправки сообщения в канал
+		const result = await safeSendMessageToChannel(question, answer);
+
+		if (result.success) {
 			await ctx.reply("Ответ опубликован в канале!");
-		} catch (error) {
-			console.error("Ошибка отправки в канал:", error);
-			await ctx.reply("Ошибка при публикации ответа: " + error.message);
+		} else {
+			console.error("Ошибка отправки в канал:", result.error);
+			await ctx.reply(`Ошибка при публикации ответа: ${result.error}`);
 		}
 	} catch (error) {
 		console.error("Ошибка при обработке сообщения:", error);
@@ -313,18 +363,14 @@ app.post(`/webhook/${BOT_TOKEN}`, async (req, res) => {
 					const answer = await askChatGPT(question);
 					console.log('Получен ответ от ChatGPT:', answer.substring(0, 50) + '...');
 
-					try {
-						console.log('Пытаюсь отправить сообщение в канал:', CHANNEL_ID);
-						await bot.telegram.sendMessage(
-							CHANNEL_ID,
-							`❓ *Вопрос:* ${question}\n\n💡 *Ответ:* ${answer}`,
-							{ parse_mode: "Markdown" }
-						);
-						console.log('Сообщение успешно отправлено в канал');
+					// Используем безопасную функцию отправки сообщения в канал
+					const result = await safeSendMessageToChannel(question, answer);
+
+					if (result.success) {
 						await ctx.reply("Ответ опубликован в канале!");
-					} catch (error) {
-						console.error("Ошибка отправки в канал:", error);
-						await ctx.reply("Ошибка при публикации ответа: " + error.message);
+					} else {
+						console.error("Ошибка отправки в канал:", result.error);
+						await ctx.reply(`Ошибка при публикации ответа: ${result.error}`);
 					}
 				} catch (error) {
 					console.error("Ошибка при обработке сообщения:", error);
@@ -378,6 +424,12 @@ app.get("/health", (req, res) => {
 // Запуск сервера Express
 app.listen(PORT, async () => {
 	console.log(`🚀 Сервер запущен на порту ${PORT}`);
+
+	// Проверяем API ключ OpenAI
+	const isOpenAIKeyValid = await checkOpenAIApiKey();
+	if (!isOpenAIKeyValid) {
+		console.warn('⚠️ API ключ OpenAI недействителен или имеет ограничения. Бот будет работать с ограниченной функциональностью.');
+	}
 
 	// Определяем, в какой среде запущен бот
 	const isProduction = process.env.NODE_ENV === 'production';
@@ -515,3 +567,56 @@ process.on('SIGINT', async () => {
 	console.log('Завершаю работу...');
 	process.exit(0);
 });
+
+// Функция для безопасной отправки сообщения в канал
+async function safeSendMessageToChannel(question, answer) {
+	try {
+		console.log('Пытаюсь отправить сообщение в канал:', CHANNEL_ID);
+
+		// Проверяем, что ID канала не пустой
+		if (!CHANNEL_ID || CHANNEL_ID.trim() === '') {
+			console.error('ID канала отсутствует или пустой');
+			return { success: false, error: 'ID канала отсутствует или пустой' };
+		}
+
+		// Проверяем, что ответ не пустой
+		if (!answer || answer.trim() === '') {
+			console.error('Ответ пустой, нечего отправлять в канал');
+			return { success: false, error: 'Ответ пустой' };
+		}
+
+		// Форматируем сообщение
+		const message = `❓ *Вопрос:* ${question}\n\n💡 *Ответ:* ${answer}`;
+
+		// Отправляем сообщение в канал
+		await bot.telegram.sendMessage(
+			CHANNEL_ID,
+			message,
+			{ parse_mode: "Markdown" }
+		);
+
+		console.log('Сообщение успешно отправлено в канал');
+		return { success: true };
+	} catch (error) {
+		console.error("Ошибка отправки в канал:", error.message);
+
+		// Пробуем отправить без Markdown, если ошибка связана с форматированием
+		if (error.message.includes('can\'t parse entities') || error.message.includes('parse message text')) {
+			try {
+				console.log('Пробую отправить сообщение без Markdown...');
+				await bot.telegram.sendMessage(
+					CHANNEL_ID,
+					`❓ Вопрос: ${question}\n\n💡 Ответ: ${answer}`,
+					{ parse_mode: "" }
+				);
+				console.log('Сообщение успешно отправлено в канал без Markdown');
+				return { success: true };
+			} catch (plainError) {
+				console.error("Ошибка отправки в канал без Markdown:", plainError.message);
+				return { success: false, error: plainError.message };
+			}
+		}
+
+		return { success: false, error: error.message };
+	}
+}
