@@ -1,5 +1,5 @@
 const { Telegraf } = require("telegraf");
-const { Configuration, OpenAIApi } = require("openai");
+const { OpenAI } = require("openai");
 
 // Читаем переменные окружения напрямую (Railway подставит их)
 const BOT_TOKEN = process.env.BOT_TOKEN;
@@ -14,9 +14,9 @@ if (!BOT_TOKEN || !OPENAI_API_KEY || !CHANNEL_ID) {
 
 const bot = new Telegraf(BOT_TOKEN);
 
-const openai = new OpenAIApi(
-	new Configuration({ apiKey: OPENAI_API_KEY })
-);
+const openai = new OpenAI({
+	apiKey: process.env.OPENAI_API_KEY,
+});
 
 // Функция для запроса в ChatGPT
 async function askChatGPT(question) {
