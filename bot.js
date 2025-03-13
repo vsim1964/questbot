@@ -22,6 +22,12 @@ if (!CHANNEL_ID.startsWith('-100')) {
 const bot = new Telegraf(BOT_TOKEN);
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
+// Добавляем обработчик ошибок для бота
+bot.catch((err, ctx) => {
+	console.error('Ошибка Telegraf:', err);
+	console.error('Контекст ошибки:', JSON.stringify(ctx.update, null, 2));
+});
+
 // Функция для запроса к ChatGPT
 async function askChatGPT(question) {
 	try {
@@ -85,6 +91,12 @@ async function checkBotPermissionsInChannel() {
 bot.start((ctx) => {
 	console.log('Получена команда /start от пользователя:', ctx.from.id);
 	ctx.reply("Привет! Задай мне вопрос, и я отправлю ответ в канал.");
+});
+
+// Простая тестовая команда
+bot.command('test', (ctx) => {
+	console.log('Получена тестовая команда от пользователя:', ctx.from.id);
+	ctx.reply("Тест пройден! Бот работает.");
 });
 
 // Обработка команды /status
@@ -159,8 +171,21 @@ bot.command('setchannel', async (ctx) => {
 	}
 });
 
-// Обработка сообщений
+// Добавляем обработчик для отладки всех сообщений
+bot.on('message', (ctx) => {
+	console.log('Получено сообщение:', JSON.stringify(ctx.message));
+	if (ctx.message.text && ctx.message.text.startsWith('/')) {
+		console.log('Получена команда:', ctx.message.text);
+	}
+});
+
+// Обработка текстовых сообщений (не команд)
 bot.on("text", async (ctx) => {
+	// Проверяем, не является ли сообщение командой
+	if (ctx.message.text.startsWith('/')) {
+		return; // Пропускаем команды, они обрабатываются выше
+	}
+
 	console.log('Получено текстовое сообщение от пользователя:', ctx.from.id, 'Текст:', ctx.message.text);
 	const question = ctx.message.text;
 	ctx.reply("Обрабатываю ваш запрос...");
@@ -190,8 +215,16 @@ app.use(express.json());
 // Webhook обработчик
 app.post(`/webhook/${BOT_TOKEN}`, (req, res) => {
 	console.log('Получен webhook запрос:', req.method, req.url);
-	bot.handleUpdate(req.body);
-	res.sendStatus(200);
+	console.log('Тело запроса:', JSON.stringify(req.body, null, 2));
+
+	try {
+		bot.handleUpdate(req.body);
+		res.sendStatus(200);
+		console.log('Webhook запрос успешно обработан');
+	} catch (error) {
+		console.error('Ошибка при обработке webhook запроса:', error);
+		res.sendStatus(500);
+	}
 });
 
 // Добавляем обработчик для проверки webhook
@@ -230,6 +263,10 @@ app.listen(PORT, async () => {
 			// Проверяем информацию о webhook
 			const webhookInfo = await bot.telegram.getWebhookInfo();
 			console.log("ℹ️ Информация о webhook:", JSON.stringify(webhookInfo, null, 2));
+
+			// Получаем информацию о боте
+			const botInfo = await bot.telegram.getMe();
+			console.log("ℹ️ Информация о боте:", JSON.stringify(botInfo, null, 2));
 
 			// Проверяем права бота в канале
 			await checkBotPermissionsInChannel();
