@@ -6,6 +6,7 @@ const BOT_TOKEN = process.env.BOT_TOKEN;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const CHANNEL_ID = process.env.CHANNEL_ID;
 const PORT = process.env.PORT || 3000;
+const WEBHOOK_URL = `https://questbot-production.up.railway.app/webhook/${BOT_TOKEN}`;
 
 if (!BOT_TOKEN || !OPENAI_API_KEY || !CHANNEL_ID) {
 	console.error("Ошибка: отсутствуют переменные окружения!");
@@ -15,7 +16,7 @@ if (!BOT_TOKEN || !OPENAI_API_KEY || !CHANNEL_ID) {
 const bot = new Telegraf(BOT_TOKEN);
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
-// ChatGPT API
+// Функция для запроса к ChatGPT
 async function askChatGPT(question) {
 	try {
 		const response = await openai.chat.completions.create({
@@ -66,7 +67,6 @@ app.post(`/webhook/${BOT_TOKEN}`, (req, res) => {
 });
 
 app.listen(PORT, async () => {
-	const webhookUrl = `https://your-railway-app-url/webhook/${BOT_TOKEN}`;
-	await bot.telegram.setWebhook(webhookUrl);
-	console.log(`🚀 Бот работает через Webhook: ${webhookUrl}`);
+	await bot.telegram.setWebhook(WEBHOOK_URL);
+	console.log(`🚀 Бот работает через Webhook: ${WEBHOOK_URL}`);
 });
