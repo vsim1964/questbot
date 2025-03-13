@@ -1,33 +1,30 @@
 const { Telegraf } = require("telegraf");
 const { OpenAI } = require("openai");
 
-// Читаем переменные окружения напрямую (Railway подставит их)
+// Читаем переменные окружения (Railway подставит их)
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const CHANNEL_ID = process.env.CHANNEL_ID; // ID канала, куда бот отправляет ответы
+const CHANNEL_ID = process.env.CHANNEL_ID;
 
-// Проверка на наличие всех переменных (чтобы не было ошибок на сервере)
+// Проверяем, что все переменные заданы
 if (!BOT_TOKEN || !OPENAI_API_KEY || !CHANNEL_ID) {
-	console.error("Ошибка: Отсутствуют переменные окружения!");
+	console.error("Ошибка: отсутствуют переменные окружения!");
 	process.exit(1);
 }
 
 const bot = new Telegraf(BOT_TOKEN);
+const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
-const openai = new OpenAI({
-	apiKey: process.env.OPENAI_API_KEY,
-});
-
-// Функция для запроса в ChatGPT
+// Функция для запроса к ChatGPT
 async function askChatGPT(question) {
 	try {
-		const response = await openai.createChatCompletion({
-			model: "gpt-4", // Можно использовать "gpt-3.5-turbo"
+		const response = await openai.chat.completions.create({
+			model: "gpt-4",
 			messages: [{ role: "user", content: question }],
 			max_tokens: 200,
 		});
 
-		return response.data.choices[0].message.content.trim();
+		return response.choices[0].message.content.trim();
 	} catch (error) {
 		console.error("Ошибка ChatGPT:", error);
 		return "Ошибка при обработке запроса. Попробуйте позже.";
@@ -42,7 +39,6 @@ bot.start((ctx) => {
 // Обработка сообщений от пользователей
 bot.on("text", async (ctx) => {
 	const question = ctx.message.text;
-
 	ctx.reply("Обрабатываю ваш запрос...");
 
 	const answer = await askChatGPT(question);
@@ -64,3 +60,7 @@ bot.on("text", async (ctx) => {
 // Запуск бота
 bot.launch();
 console.log("Бот запущен на Railway!");
+
+// Обработка остановки Railway
+process.once("SIGINT", () => bot.stop("SIGINT"));
+process.once("SIGTERM", () => bot.stop("SIGTERM"));
